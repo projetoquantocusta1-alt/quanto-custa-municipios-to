@@ -1,0 +1,19 @@
+/* Estado pelo SICONFI: avisos de limitação e quadro empenhado x liquidado */
+.limite { background: #EEF4FB; border: 1px solid #B9D0EA; border-left: 5px solid #2463A6; border-radius: 10px; padding: 10px 14px; font-size: 14px; line-height: 1.5; color: #10243A; margin: 10px 0 12px; }
+.ep .ep-lista { display: grid; gap: 14px; margin: 6px 0 10px; }
+.ep-linha { border: 1px solid var(--line, #DDE4EB); border-radius: 10px; padding: 12px 14px; }
+.ep-rot { font-weight: 700; margin-bottom: 6px; }
+.ep-nums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.ep-nums span { display: block; font-size: 12px; color: var(--muted, #5B7189); text-transform: uppercase; letter-spacing: .04em; }
+.ep-nums b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.ep-falta b { color: #9A5B00; }
+.ep-barra { height: 10px; border-radius: 999px; background: #F3C77C; overflow: hidden; margin: 10px 0 4px; }
+.ep-barra i { display: block; height: 100%; background: #2463A6; }
+.a-pagar { color: #9A5B00; font-weight: 600; }
+@media (max-width: 560px) { .ep-nums { grid-template-columns: 1fr; } .ep-nums b { font-size: 16px; } }
+.limite details summary { cursor: pointer; list-style: none; }
+.limite details summary::-webkit-details-marker { display: none; }
+.limite details summary::after { content: " ▾"; color: #2463A6; font-weight: 700; }
+.limite details[open] summary::after { content: " ▴"; }
+.limite details summary:focus-visible { outline: 2px solid #2463A6; outline-offset: 2px; border-radius: 4px; }
+.limite details p { margin: 8px 0 0; }
