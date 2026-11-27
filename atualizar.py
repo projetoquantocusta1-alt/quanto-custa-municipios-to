@@ -373,8 +373,10 @@ def montar(hoje: date):
             u = div["anos"][div["ultimo"]]
             if u.get("dcl") is not None:
                 lim, al = u.get("limite") or 0, u.get("limite_alerta") or 0
+                pop_div = populacao.populacao_no_ano(pop.get(i) or {}, int(div["ultimo"]))
                 divida_resumo.append({"ibge": i, "nome": e["nome"], "ano": div["ultimo"], "fechado": u["fechado"],
                                       "dcl": u["dcl"], "dc": u.get("dc"), "rcl": u.get("rcl"), "pct_dcl": u.get("pct_dcl"),
+                                      "populacao": pop_div,
                                       "acima": bool(lim and u["dcl"] > lim), "alerta": bool(al and u["dcl"] > al)})
             for a in div["anos"]:
                 div_anos_cobertos.add(int(a))

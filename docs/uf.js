@@ -259,7 +259,8 @@ function rDivida() {
     $("#d-tab").innerHTML = `<tbody><tr><td class="vazio">A dívida ainda está sendo coletada pelo robô (RGF). Volte em algumas horas.</td></tr></tbody>`;
     return;
   }
-  const ms = DV.municipios, acima = ms.filter(r => r.acima).length, alerta = ms.filter(r => r.alerta && !r.acima).length;
+  const ms = DV.municipios.map(r => ({ ...r, porHab: r.populacao && r.dcl != null ? r.dcl / r.populacao : null }));
+  const acima = ms.filter(r => r.acima).length, alerta = ms.filter(r => r.alerta && !r.acima).length;
   const somaDcl = ms.reduce((s, r) => s + (r.dcl > 0 ? r.dcl : 0), 0);
   kpis("#d-kpis", [
     ["Dívida líquida somada", curto(somaDcl), `${ms.length} prefeituras com dado · ano mais recente de cada`],
@@ -272,8 +273,8 @@ function rDivida() {
   const vis = L.slice(0, E.limD), n1 = n => n == null ? "—" : n.toLocaleString("pt-BR", { maximumFractionDigits: 1 });
   const selo = r => r.acima ? '<span class="dv-selo dv-acima">acima</span>' : r.alerta ? '<span class="dv-selo dv-alerta">alerta</span>' : '<span class="dv-selo dv-ok">ok</span>';
   const th = (k2, t, nu) => `<th class="${nu ? "num" : ""}" data-kd="${k2}" style="cursor:pointer">${t}${k === k2 ? (d < 0 ? " ▼" : " ▲") : ""}</th>`;
-  $("#d-tab").innerHTML = `<thead><tr><th class="num">#</th>${th("nome", "Município")}${th("dcl", "Dívida líquida", 1)}${th("pct_dcl", "% da receita", 1)}<th>Situação (ano)</th></tr></thead><tbody>${
-    vis.map((r, i) => `<tr><td class="num sub">${i + 1}</td><td><button class="link-dep" data-ibge="${r.ibge}">${esc(r.nome)}</button></td><td class="num">${curto(r.dcl)}</td><td class="num">${r.pct_dcl != null ? n1(r.pct_dcl) + "%" : "—"}</td><td>${selo(r)} <span class="sub">${r.ano}${r.fechado ? "" : " parcial"}</span></td></tr>`).join("") || `<tr><td colspan="5" class="vazio">Nada encontrado.</td></tr>`}</tbody>`;
+  $("#d-tab").innerHTML = `<thead><tr><th class="num">#</th>${th("nome", "Município")}${th("populacao", "População", 1)}${th("dcl", "Dívida líquida", 1)}${th("porHab", "Por habitante", 1)}${th("pct_dcl", "% da receita", 1)}<th>Situação (ano)</th></tr></thead><tbody>${
+    vis.map((r, i) => `<tr><td class="num sub">${i + 1}</td><td><button class="link-dep" data-ibge="${r.ibge}">${esc(r.nome)}</button></td><td class="num">${r.populacao != null ? num(r.populacao) : "—"}</td><td class="num">${curto(r.dcl)}</td><td class="num">${r.porHab != null ? brl(r.porHab) : "—"}</td><td class="num">${r.pct_dcl != null ? n1(r.pct_dcl) + "%" : "—"}</td><td>${selo(r)} <span class="sub">${r.ano}${r.fechado ? "" : " parcial"}</span></td></tr>`).join("") || `<tr><td colspan="7" class="vazio">Nada encontrado.</td></tr>`}</tbody>`;
   $("#d-mais").hidden = L.length <= E.limD;
 }
 
