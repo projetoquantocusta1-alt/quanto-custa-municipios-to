@@ -118,6 +118,63 @@ def coletar_siconfi(hoje: date, limite_s: float) -> int:
     return feitos
 
 
+def ultimo_quadri_possivel(ano: int, hoje: date) -> int:
+    """Último quadrimestre do RGF que já pode ter sido entregue (prazo: 30 dias após o fim do quadrimestre).
+    Quadrimestres terminam em abr (1), ago (2) e dez (3)."""
+    if ano < hoje.year:
+        return 3
+    if hoje.month >= 10:       # 3º quadrimestre do ano anterior já fechou; o 2º deste ano sai ~out
+        return 2
+    if hoje.month >= 6:        # 1º quadrimestre (fim abr) entregue ~jun
+        return 1
+    return 0
+
+
+def coletar_rgf(hoje: date, limite_s: float) -> int:
+    """Dívida consolidada (RGF, Anexo 02) de cada município e ano, do mais novo para o mais antigo.
+    Mesmo esquema do RREO: ano fechado é guardado e não se repete; ano aberto procura o quadrimestre
+    mais novo; quem não entregou fica anotado ('falta') e é tentado de novo depois de 15 dias."""
+    pasta = BRUTOS / "rgf"
+    lista = ler(BRUTOS / "siconfi" / "entes.json", []) or []
+    t0, feitos = time.time(), 0
+    for ano in range(hoje.year, config.ANO_INICIAL - 1, -1):
+        maxp = ultimo_quadri_possivel(ano, hoje)
+        if not maxp:
+            continue
+        for e in lista:
+            if time.time() - t0 > limite_s:
+                log.warning("tempo da dívida esgotado; o resto fica para a próxima execução (%d consultas)", feitos)
+                return feitos
+            arq = pasta / f"{e['ibge']}.json"
+            d = ler(arq, {}) or {}
+            atual = d.get(str(ano)) or {}
+            fechado = (atual.get("periodicidade") == "Q" and (atual.get("periodo") or 0) >= 3) or \
+                      (atual.get("periodicidade") == "S" and (atual.get("periodo") or 0) >= 2)
+            if fechado or (ano < hoje.year and (atual.get("periodo") or 0) >= maxp):
+                continue
+            if ano == hoje.year and (atual.get("periodo") or 0) >= maxp and atual.get("periodicidade") == "Q":
+                continue
+            if atual.get("falta") and hoje.toordinal() - date.fromisoformat(atual["falta"]).toordinal() < 15:
+                continue
+            achado = None
+            try:
+                achado = siconfi.rgf2(e["ibge"], ano, maxp)
+            except http.SiteForaDoAr as x:
+                log.error("%s", x)
+                return feitos
+            except Exception as x:  # noqa: BLE001
+                log.warning("RGF %s %s %d: %s", e["nome"], e["ibge"], ano, x)
+            feitos += 1
+            if achado:
+                achado["baixado_em"] = hoje.isoformat()
+                d[str(ano)] = achado
+            elif not atual.get("periodo"):
+                d[str(ano)] = {"falta": hoje.isoformat()}
+            gravar(arq, d)
+        log.info("RGF (dívida) %d: pronto", ano)
+    return feitos
+
+
 # ------------------------------------------------------------------ TSE, IBGE, IPCA
 def tse(lista: list[dict], refazer=False) -> int:
     """Eleitos de cada eleição municipal. O TSE usa códigos próprios (SG_UE); a ligação com o IBGE é pelo nome."""
@@ -226,6 +283,46 @@ def alertas_camara(d: dict, desde: int) -> dict:
     return out
 
 
+def prever_dcl(serie: list[tuple[int, float]], ano_alvo: int) -> dict | None:
+    """Projeção simples (tendência linear) da dívida líquida para 'ano_alvo' (o ano seguinte ao
+    último com dado). Fita a reta nos anos fechados; precisa de pelo menos 3. Sempre uma estimativa.
+    A DCL pode ficar negativa (cidade com mais caixa que dívida), então não é cortada em zero."""
+    if len(serie) < 3:
+        return None
+    xs = [a for a, _ in serie]
+    ys = [v for _, v in serie]
+    n = len(xs)
+    mx, my = sum(xs) / n, sum(ys) / n
+    sxx = sum((x - mx) ** 2 for x in xs)
+    sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    if sxx == 0:
+        return None
+    b = sxy / sxx
+    pred = (my - b * mx) + b * ano_alvo
+    return {"ano": ano_alvo, "dcl": round(pred, 2), "metodo": "tendência dos últimos anos"}
+
+
+def divida_do_municipio(ibge: str) -> dict | None:
+    """Lê o bruto do RGF de um município e monta o bloco de dívida (séries por ano + previsão)."""
+    rgf = ler(BRUTOS / "rgf" / f"{ibge}.json", {}) or {}
+    anos = {}
+    for ano_s, x in sorted(rgf.items()):
+        if x.get("falta") or int(ano_s) < config.ANO_INICIAL:
+            continue
+        fechado = (x.get("periodicidade") == "Q" and (x.get("periodo") or 0) >= 3) or \
+                  (x.get("periodicidade") == "S" and (x.get("periodo") or 0) >= 2)
+        anos[ano_s] = {"periodo": x.get("periodo"), "periodicidade": x.get("periodicidade"), "fechado": fechado,
+                       "dc": x.get("dc"), "contratual": x.get("contratual"), "precatorios": x.get("precatorios"),
+                       "parcelamentos": x.get("parcelamentos"), "outras": x.get("outras"), "deducoes": x.get("deducoes"),
+                       "dcl": x.get("dcl"), "rcl": x.get("rcl"), "pct_dc": x.get("pct_dc"), "pct_dcl": x.get("pct_dcl"),
+                       "limite": x.get("limite"), "limite_alerta": x.get("limite_alerta")}
+    if not anos:
+        return None
+    serie = sorted((int(a), v["dcl"]) for a, v in anos.items() if v["fechado"] and v["dcl"] is not None)
+    ultimo = max(anos)
+    return {"anos": anos, "ultimo": ultimo, "previsao": prever_dcl(serie, int(ultimo) + 1)}
+
+
 def montar(hoje: date):
     lista = ler(BRUTOS / "siconfi" / "entes.json", []) or []
     pop = ler(BRUTOS / "populacao.json", {}) or {}
@@ -233,6 +330,7 @@ def montar(hoje: date):
     eleitos = {el: (ler(BRUTOS / "tse" / f"eleitos_{el}.json", {}) or {}).get("municipios", {}) for el in config.ELEICOES_MUNICIPAIS}
     resumo, cobertura, faltas, parciais, periodos, lista_alertas = [], Counter(), {}, {}, {}, {}
     anos = set()
+    divida_resumo, div_anos_cobertos = [], set()
     for e in lista:
         i = e["ibge"]
         d = ler(BRUTOS / "siconfi" / f"{i}.json", {}) or {}
@@ -269,9 +367,30 @@ def montar(hoje: date):
             cobertura[ano_s] += 1
             periodos.setdefault(ano_s, Counter())[x["periodo"]] += 1
             anos.add(ano)
+        div = divida_do_municipio(i)
+        if div:
+            det["divida"] = div
+            u = div["anos"][div["ultimo"]]
+            if u.get("dcl") is not None:
+                lim, al = u.get("limite") or 0, u.get("limite_alerta") or 0
+                divida_resumo.append({"ibge": i, "nome": e["nome"], "ano": div["ultimo"], "fechado": u["fechado"],
+                                      "dcl": u["dcl"], "dc": u.get("dc"), "rcl": u.get("rcl"), "pct_dcl": u.get("pct_dcl"),
+                                      "acima": bool(lim and u["dcl"] > lim), "alerta": bool(al and u["dcl"] > al)})
+            for a in div["anos"]:
+                div_anos_cobertos.add(int(a))
         gravar(SAIDA / "m" / f"{i}.json", det)
         resumo.append({"ibge": i, "nome": e["nome"], "anos": linhas})
     gravar(SAIDA / "resumo.json", {"campos": CAMPOS, "municipios": resumo})
+    divida_resumo.sort(key=lambda r: -(r["dcl"] or 0))
+    gravar(SAIDA / "divida.json", {
+        "gerado_em": datetime.now(timezone.utc).isoformat(timespec="minutes"),
+        "uf": config.UF, "estado": config.ESTADO, "do_estado": config.DO_ESTADO,
+        "anos": sorted(div_anos_cobertos), "com_divida": len(divida_resumo),
+        "acima_do_limite": sorted(r["nome"] for r in divida_resumo if r["acima"]),
+        "em_alerta": sorted(r["nome"] for r in divida_resumo if r["alerta"] and not r["acima"]),
+        "municipios": divida_resumo,
+        "fonte": "SICONFI (Tesouro Nacional), RGF Anexo 02 (Dívida Consolidada Líquida)",
+    })
     sem_tse = sorted({n for el in config.ELEICOES_MUNICIPAIS for n in (ler(BRUTOS / "tse" / f"eleitos_{el}.json", {}) or {}).get("sem_ligacao", [])})
     gravar(SAIDA / "meta.json", {
         "gerado_em": datetime.now(timezone.utc).isoformat(timespec="minutes"),
@@ -299,7 +418,9 @@ def main(argv=None):
             atualizar_ipca()
             ibge()
             tse(lista)
-        coletar_siconfi(hoje, a.minutos * 60)
+        t0 = time.time()
+        coletar_siconfi(hoje, a.minutos * 60 * 0.6)
+        coletar_rgf(hoje, max(0.0, a.minutos * 60 - (time.time() - t0)))
     montar(hoje)
     return 0
 
