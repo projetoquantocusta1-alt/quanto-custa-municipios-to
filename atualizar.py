@@ -312,6 +312,7 @@ def divida_do_municipio(ibge: str) -> dict | None:
         fechado = (x.get("periodicidade") == "Q" and (x.get("periodo") or 0) >= 3) or \
                   (x.get("periodicidade") == "S" and (x.get("periodo") or 0) >= 2)
         anos[ano_s] = {"periodo": x.get("periodo"), "periodicidade": x.get("periodicidade"), "fechado": fechado,
+                       "populacao": x.get("populacao"),
                        "dc": x.get("dc"), "contratual": x.get("contratual"), "precatorios": x.get("precatorios"),
                        "parcelamentos": x.get("parcelamentos"), "outras": x.get("outras"), "deducoes": x.get("deducoes"),
                        "dcl": x.get("dcl"), "rcl": x.get("rcl"), "pct_dc": x.get("pct_dc"), "pct_dcl": x.get("pct_dcl"),
@@ -370,14 +371,17 @@ def montar(hoje: date):
         div = divida_do_municipio(i)
         if div:
             det["divida"] = div
-            u = div["anos"][div["ultimo"]]
-            if u.get("dcl") is not None:
-                lim, al = u.get("limite") or 0, u.get("limite_alerta") or 0
-                pop_div = populacao.populacao_no_ano(pop.get(i) or {}, int(div["ultimo"]))
-                divida_resumo.append({"ibge": i, "nome": e["nome"], "ano": div["ultimo"], "fechado": u["fechado"],
-                                      "dcl": u["dcl"], "dc": u.get("dc"), "rcl": u.get("rcl"), "pct_dcl": u.get("pct_dcl"),
-                                      "populacao": pop_div,
-                                      "acima": bool(lim and u["dcl"] > lim), "alerta": bool(al and u["dcl"] > al)})
+            # ranking por ano: cada ano com dado vira [dcl, % da receita, população]; acima/alerta saem do %
+            # (acima = % > 120, o teto legal; alerta = % > 108), igual ao limite da lei.
+            por_ano = {a: [v["dcl"], v.get("pct_dcl"), v.get("populacao"), 1 if v["fechado"] else 0]
+                       for a, v in div["anos"].items() if v.get("dcl") is not None}
+            if por_ano:
+                ult = div["ultimo"]
+                pu = por_ano.get(ult) or next(iter(por_ano.values()))
+                pct = pu[1] or 0
+                divida_resumo.append({"ibge": i, "nome": e["nome"], "ano": ult, "fechado": div["anos"][ult]["fechado"],
+                                      "dcl": pu[0], "pct_dcl": pu[1], "populacao": pu[2],
+                                      "acima": pct > 120, "alerta": 108 < pct <= 120, "por_ano": por_ano})
             for a in div["anos"]:
                 div_anos_cobertos.add(int(a))
         gravar(SAIDA / "m" / f"{i}.json", det)
